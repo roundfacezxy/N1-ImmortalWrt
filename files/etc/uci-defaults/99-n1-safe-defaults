@@ -6,8 +6,10 @@ set network.lan.proto='static'
 set network.lan.ipaddr='192.168.10.1'
 set network.lan.netmask='255.255.255.0'
 set zerotier.global.enabled='0'
+set luci.main.mediaurlbase='/luci-static/argon'
 commit network
 commit zerotier
+commit luci
 EOF
 
 /etc/init.d/zerotier disable 2>/dev/null || true

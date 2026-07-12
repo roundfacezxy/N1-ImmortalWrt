@@ -151,7 +151,10 @@ jobs:
           }
           rootfs="${rootfs_candidates[0]}"
           manifest="${manifest_candidates[0]}"
-          for package in luci-app-passwall2 hysteria zerotier luci-app-zerotier; do
+          for package in \
+            luci-app-passwall2 xray-core sing-box hysteria \
+            luci-theme-argon kmod-brcmfmac wifi-scripts iw iwinfo \
+            wireless-regdb wpad-basic-mbedtls zerotier luci-app-zerotier; do
             grep -Eq "^${package}[[:space:]-]" "${manifest}" || {
               echo "Package missing from manifest: ${package}" >&2
               exit 1
@@ -166,12 +169,19 @@ jobs:
           find openwrt/bin/packages -type f \( \
             -name 'luci-app-passwall2*.apk' -o \
             -name 'luci-i18n-passwall2-zh-cn*.apk' -o \
+            -name 'sing-box*.apk' -o \
             -name 'hysteria*.apk' -o \
+            -name 'luci-theme-argon*.apk' -o \
+            -name 'wpad-basic-mbedtls*.apk' -o \
             -name 'zerotier*.apk' -o \
             -name 'luci-app-zerotier*.apk' \
           \) -exec cp -t release {} +
           tar -tzf "${rootfs}" > release/rootfs.contents
           grep -Eq '(^|\./)usr/bin/hysteria$' release/rootfs.contents
+          grep -Eq '(^|\./)usr/bin/sing-box$' release/rootfs.contents
+          grep -Eq '(^|\./)lib/netifd/wireless/mac80211\.sh$' release/rootfs.contents
+          grep -Eq '(^|\./)usr/sbin/hostapd$' release/rootfs.contents
+          grep -Eq '(^|\./)www/luci-static/argon/' release/rootfs.contents
           gzip -9 -c build.log > release/build.log.gz
 
       - name: Preserve compiled rootfs for the packaging job
