@@ -154,7 +154,8 @@ jobs:
           for package in \
             luci-app-passwall2 xray-core sing-box hysteria \
             luci-theme-argon kmod-brcmfmac wifi-scripts iw iwinfo \
-            wireless-regdb wpad-basic-mbedtls zerotier luci-app-zerotier; do
+            wireless-regdb wpad-basic-mbedtls zerotier luci-app-zerotier \
+            bash btrfs-progs dosfstools e2fsprogs fdisk uuidgen; do
             grep -Eq "^${package}[[:space:]-]" "${manifest}" || {
               echo "Package missing from manifest: ${package}" >&2
               exit 1
@@ -182,6 +183,12 @@ jobs:
           grep -Eq '(^|\./)lib/netifd/wireless/mac80211\.sh$' release/rootfs.contents
           grep -Eq '(^|\./)usr/sbin/hostapd$' release/rootfs.contents
           grep -Eq '(^|\./)www/luci-static/argon/' release/rootfs.contents
+          grep -Eq '(^|\./)bin/bash$' release/rootfs.contents
+          grep -Eq '(^|\./)usr/bin/uuidgen$' release/rootfs.contents
+          grep -Eq '(^|\./)usr/(s?bin)/mkfs\.btrfs$' release/rootfs.contents
+          grep -Eq '(^|\./)usr/sbin/mkfs\.fat$' release/rootfs.contents
+          grep -Eq '(^|\./)usr/sbin/mkfs\.ext4$' release/rootfs.contents
+          grep -Eq '(^|\./)usr/sbin/fdisk$' release/rootfs.contents
           gzip -9 -c build.log > release/build.log.gz
 
       - name: Preserve compiled rootfs for the packaging job

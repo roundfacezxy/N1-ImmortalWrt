@@ -30,6 +30,12 @@ required=(
   CONFIG_PACKAGE_wpad-basic-mbedtls
   CONFIG_PACKAGE_zerotier
   CONFIG_PACKAGE_luci-app-zerotier
+  CONFIG_PACKAGE_bash
+  CONFIG_PACKAGE_btrfs-progs
+  CONFIG_PACKAGE_dosfstools
+  CONFIG_PACKAGE_e2fsprogs
+  CONFIG_PACKAGE_fdisk
+  CONFIG_PACKAGE_uuidgen
 )
 
 for symbol in "${required[@]}"; do
