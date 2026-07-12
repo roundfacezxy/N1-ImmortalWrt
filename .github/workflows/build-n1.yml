@@ -191,7 +191,7 @@ jobs:
           name: n1-compiled-rootfs
           path: release/
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 1
           compression-level: 0
           overwrite: true
 
