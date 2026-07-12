@@ -158,7 +158,8 @@ jobs:
             -name 'zerotier*.apk' -o \
             -name 'luci-app-zerotier*.apk' \
           \) -exec cp -t release {} +
-          tar -tzf "${rootfs}" | grep -Eq '(^|\./)usr/bin/hysteria$'
+          tar -tzf "${rootfs}" > release/rootfs.contents
+          grep -Eq '(^|\./)usr/bin/hysteria$' release/rootfs.contents
 
       - name: Reclaim space before N1 packaging
         run: |
