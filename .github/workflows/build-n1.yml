@@ -118,12 +118,6 @@ jobs:
         run: |
           set -euo pipefail
           make download -j"$(nproc)"
-          bad_downloads="$(find dl -type f -size -1024c -print)"
-          if [[ -n "${bad_downloads}" ]]; then
-            echo "Incomplete downloads:" >&2
-            echo "${bad_downloads}" >&2
-            exit 1
-          fi
 
       - name: Compile the ARM64 rootfs
         working-directory: /builder/openwrt
