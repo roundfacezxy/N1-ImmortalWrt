@@ -135,8 +135,10 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p release
-          mapfile -t rootfs_candidates < <(find openwrt/bin/targets/armsr/armv8 -maxdepth 1 -type f -name '*rootfs.tar.gz')
-          mapfile -t manifest_candidates < <(find openwrt/bin/targets/armsr/armv8 -maxdepth 1 -type f -name '*.manifest')
+          mapfile -t rootfs_candidates < <(find openwrt/bin/targets/armsr/armv8 -maxdepth 1 -type f \
+            -name '*-generic-rootfs.tar.gz' ! -name '*-targz-rootfs.tar.gz')
+          mapfile -t manifest_candidates < <(find openwrt/bin/targets/armsr/armv8 -maxdepth 1 -type f \
+            -name '*-generic.manifest')
           (( ${#rootfs_candidates[@]} == 1 )) || {
             echo "Expected exactly one rootfs archive, found ${#rootfs_candidates[@]}." >&2
             printf '%s\n' "${rootfs_candidates[@]}" >&2
@@ -170,18 +172,71 @@ jobs:
           \) -exec cp -t release {} +
           tar -tzf "${rootfs}" > release/rootfs.contents
           grep -Eq '(^|\./)usr/bin/hysteria$' release/rootfs.contents
+          gzip -9 -c build.log > release/build.log.gz
 
-      - name: Reclaim space before N1 packaging
+      - name: Preserve compiled rootfs for the packaging job
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: n1-compiled-rootfs
+          path: release/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+          overwrite: true
+
+  package:
+    name: Package and publish Phicomm N1 image
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+
+    env:
+      TZ: Asia/Shanghai
+
+    steps:
+      - name: Restore the compiled rootfs
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: n1-compiled-rootfs
+          path: release
+
+      - name: Load locked packaging versions
+        shell: bash
         run: |
           set -euo pipefail
-          rm openwrt
-          rm -rf "${BUILD_ROOT}/openwrt"
-          df -hT "${BUILD_ROOT}"
+          source release/versions.env
+          {
+            echo "IMMORTALWRT_VERSION=${IMMORTALWRT_VERSION}"
+            echo "OPHUB_KERNEL_VERSION=${OPHUB_KERNEL_VERSION}"
+            echo "DEFAULT_IP=${DEFAULT_IP}"
+            echo "IMAGE_SIZE=${IMAGE_SIZE}"
+          } >> "${GITHUB_ENV}"
+          command -v gh
+          mapfile -t rootfs_candidates < <(find release -maxdepth 1 -type f \
+            -name '*-generic-rootfs.tar.gz' ! -name '*-targz-rootfs.tar.gz')
+          (( ${#rootfs_candidates[@]} == 1 )) || {
+            echo "Compiled artifact must contain exactly one standard generic rootfs; found ${#rootfs_candidates[@]}." >&2
+            printf '%s\n' "${rootfs_candidates[@]}" >&2
+            exit 1
+          }
+          tar -tzf "${rootfs_candidates[0]}" > /dev/null
+
+      - name: Install N1 packaging dependencies
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bsdextrautils btrfs-progs ca-certificates curl dosfstools e2fsprogs \
+            git gzip jq parted pigz qemu-utils rsync tar unzip util-linux \
+            uuid-runtime wget xz-utils zstd
+          sudo apt-get clean
 
       - name: Package only the Phicomm N1 image
         uses: ophub/amlogic-s9xxx-openwrt@89d550eaf76cab0911ba84e40d16b9e37a05637f
         with:
-          openwrt_path: release/*rootfs.tar.gz
+          openwrt_path: release/*-generic-rootfs.tar.gz
           openwrt_board: s905d
           openwrt_kernel: ${{ env.OPHUB_KERNEL_VERSION }}
           auto_kernel: false
@@ -216,8 +271,6 @@ jobs:
           }
           gzip -t "${images[0]}"
           cp "${images[0]}" release/
-          gzip -9 build.log
-          cp build.log.gz release/
           (
             cd release
             find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
@@ -225,13 +278,13 @@ jobs:
           )
 
       - name: Publish the audited release
-        if: ${{ env.PACKAGED_STATUS == 'success' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           tag="n1-${IMMORTALWRT_VERSION}-k${OPHUB_KERNEL_VERSION}-build.${GITHUB_RUN_NUMBER}"
           mapfile -d '' assets < <(find release -type f -print0)
+          (( ${#assets[@]} > 0 ))
           gh release create "${tag}" \
             --repo "${GITHUB_REPOSITORY}" \
             --title "Phicomm N1 ImmortalWrt ${IMMORTALWRT_VERSION} (kernel ${OPHUB_KERNEL_VERSION})" \
