@@ -96,11 +96,13 @@ jobs:
         run: |
           set -euo pipefail
           cp config/feeds.conf.default openwrt/feeds.conf.default
-          cp config/n1.seed.config openwrt/.config
           cp -a files openwrt/files
           cd openwrt
           ./scripts/feeds update -a
           ./scripts/feeds install -a
+          test -L package/feeds/passwall2/luci-app-passwall2
+          test -L package/feeds/passwall_packages/hysteria
+          cp "${GITHUB_WORKSPACE}/config/n1.seed.config" .config
           make defconfig
           bash "${GITHUB_WORKSPACE}/scripts/verify-config.sh" .config
           cp .config "${GITHUB_WORKSPACE}/resolved.config"
