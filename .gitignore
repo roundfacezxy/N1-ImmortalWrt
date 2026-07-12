@@ -1,7 +1,10 @@
-# Local editor and operating-system files only. Build products are created on GitHub.
+# Local editor and operating-system files.
 .idea/
 .vscode/
 *.swp
 *.tmp
 Thumbs.db
 .DS_Store
+
+# Local Docker build products. Do not commit generated firmware images.
+local-output/

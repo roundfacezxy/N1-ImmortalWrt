@@ -1,0 +1,32 @@
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Asia/Shanghai
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ack antlr3 aria2 asciidoc autoconf automake autopoint binutils bison \
+    bsdextrautils btrfs-progs build-essential bzip2 ca-certificates ccache \
+    clang cmake coreutils cpio curl device-tree-compiler dosfstools ecj \
+    e2fsprogs fakeroot fastjar fdisk flex g++-multilib gawk gcc-multilib \
+    genisoimage gettext git gnutls-dev gperf gzip haveged help2man intltool \
+    jq lib32gcc-s1 libc6-dev-i386 libelf-dev libfuse-dev libglib2.0-dev \
+    libgmp3-dev libltdl-dev libmpc-dev libmpfr-dev libncurses-dev libnsl-dev \
+    libpython3-dev libreadline-dev libssl-dev libtool libyaml-dev libz-dev \
+    llvm lrzsz msmtp nano ninja-build ntpdate p7zip p7zip-full parted patch \
+    pigz pkgconf python3 python3-cryptography python3-docutils python3-pip \
+    python3-ply python3-pyelftools python3-requests python3-setuptools \
+    qemu-utils quilt re2c rsync scons sharutils squashfs-tools subversion sudo \
+    swig tar texinfo uglifyjs unzip upx-ucl util-linux uuid-runtime vim wget \
+    xmlto xsltproc xxd xz-utils yasm zip zlib1g-dev zstd \
+  && apt-get clean \
+  && rm -rf /var/lib/apt/lists/*
+
+RUN useradd --create-home --shell /bin/bash builder \
+  && mkdir -p /work /output \
+  && chown -R builder:builder /work /output \
+  && printf 'builder ALL=(ALL) NOPASSWD:ALL\n' > /etc/sudoers.d/builder \
+  && chmod 0440 /etc/sudoers.d/builder
+
+USER builder
+WORKDIR /work
+CMD ["bash", "/recipe/scripts/local-build-inside-docker.sh"]
