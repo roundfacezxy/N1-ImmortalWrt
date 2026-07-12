@@ -1,0 +1,16 @@
+#!/bin/sh
+
+# This image is intended for isolated USB testing first.
+uci -q batch <<'EOF'
+set network.lan.proto='static'
+set network.lan.ipaddr='192.168.10.1'
+set network.lan.netmask='255.255.255.0'
+set zerotier.global.enabled='0'
+commit network
+commit zerotier
+EOF
+
+/etc/init.d/zerotier disable 2>/dev/null || true
+/etc/init.d/zerotier stop 2>/dev/null || true
+
+exit 0

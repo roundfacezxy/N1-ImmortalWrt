@@ -1,0 +1,213 @@
+name: Build Phicomm N1 ImmortalWrt
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: n1-immortalwrt-build
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ImmortalWrt 25.12.1 / Phicomm N1
+    runs-on: ubuntu-24.04
+    timeout-minutes: 330
+
+    env:
+      TZ: Asia/Shanghai
+      BUILD_ROOT: /builder
+
+    steps:
+      - name: Check out the build recipe
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Load and validate locked versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          source versions.env
+          {
+            echo "IMMORTALWRT_VERSION=${IMMORTALWRT_VERSION}"
+            echo "IMMORTALWRT_COMMIT=${IMMORTALWRT_COMMIT}"
+            echo "PASSWALL2_COMMIT=${PASSWALL2_COMMIT}"
+            echo "PASSWALL_PACKAGES_COMMIT=${PASSWALL_PACKAGES_COMMIT}"
+            echo "OPHUB_PACKER_COMMIT=${OPHUB_PACKER_COMMIT}"
+            echo "OPHUB_KERNEL_VERSION=${OPHUB_KERNEL_VERSION}"
+            echo "DEFAULT_IP=${DEFAULT_IP}"
+            echo "IMAGE_SIZE=${IMAGE_SIZE}"
+          } >> "${GITHUB_ENV}"
+          grep -q "${PASSWALL2_COMMIT}" config/feeds.conf.default
+          grep -q "${PASSWALL_PACKAGES_COMMIT}" config/feeds.conf.default
+
+      - name: Install build dependencies
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ack antlr3 aria2 asciidoc autoconf automake autopoint binutils bison \
+            btrfs-progs build-essential bzip2 ca-certificates ccache clang cmake \
+            coreutils cpio curl device-tree-compiler ecj fakeroot fastjar flex \
+            g++-multilib gawk gcc-multilib genisoimage gettext git gnutls-dev \
+            gperf gzip haveged help2man intltool jq lib32gcc-s1 libc6-dev-i386 \
+            libelf-dev libfuse-dev libglib2.0-dev libgmp3-dev libltdl-dev \
+            libmpc-dev libmpfr-dev libncurses-dev libnsl-dev libpython3-dev \
+            libreadline-dev libssl-dev libtool libyaml-dev libz-dev llvm lrzsz \
+            msmtp nano ninja-build ntpdate p7zip p7zip-full patch pigz pkgconf \
+            python3 python3-cryptography python3-docutils python3-pip python3-ply \
+            python3-pyelftools python3-requests python3-setuptools qemu-utils \
+            quilt re2c rsync scons sharutils squashfs-tools subversion swig tar \
+            texinfo uglifyjs unzip upx-ucl vim wget xmlto xsltproc xxd xz-utils \
+            yasm zip zlib1g-dev zstd
+          sudo apt-get clean
+
+      - name: Create bounded build storage
+        run: |
+          set -euo pipefail
+          available_gb="$(df --block-size=1G / | awk 'NR==2 {print $4}')"
+          image_gb=$((available_gb - 6))
+          if (( image_gb < 25 )); then
+            echo "At least 25 GiB is required; only ${image_gb} GiB can be allocated." >&2
+            exit 1
+          fi
+          sudo truncate -s "${image_gb}G" /root.img
+          build_device="$(sudo losetup --find --show /root.img)"
+          sudo mkfs.ext4 -q -F "${build_device}"
+          sudo mkdir -p "${BUILD_ROOT}"
+          sudo mount "${build_device}" "${BUILD_ROOT}"
+          sudo chown "${USER}:${USER}" "${BUILD_ROOT}"
+          df -hT "${BUILD_ROOT}"
+
+      - name: Clone the pinned ImmortalWrt source
+        working-directory: /builder
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none --no-checkout https://github.com/immortalwrt/immortalwrt.git openwrt
+          cd openwrt
+          git checkout --detach "${IMMORTALWRT_COMMIT}"
+          test "$(git rev-parse HEAD)" = "${IMMORTALWRT_COMMIT}"
+          ln -s "${BUILD_ROOT}/openwrt" "${GITHUB_WORKSPACE}/openwrt"
+
+      - name: Install pinned feeds and configuration
+        run: |
+          set -euo pipefail
+          cp config/feeds.conf.default openwrt/feeds.conf.default
+          cp config/n1.seed.config openwrt/.config
+          cp -a files openwrt/files
+          cd openwrt
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+          make defconfig
+          bash "${GITHUB_WORKSPACE}/scripts/verify-config.sh" .config
+          cp .config "${GITHUB_WORKSPACE}/resolved.config"
+
+      - name: Cache downloaded source archives only
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: /builder/openwrt/dl
+          key: n1-dl-${{ env.IMMORTALWRT_COMMIT }}-${{ env.PASSWALL2_COMMIT }}-${{ env.PASSWALL_PACKAGES_COMMIT }}
+
+      - name: Download source archives
+        working-directory: /builder/openwrt
+        run: |
+          set -euo pipefail
+          make download -j"$(nproc)"
+          bad_downloads="$(find dl -type f -size -1024c -print)"
+          if [[ -n "${bad_downloads}" ]]; then
+            echo "Incomplete downloads:" >&2
+            echo "${bad_downloads}" >&2
+            exit 1
+          fi
+
+      - name: Compile the ARM64 rootfs
+        working-directory: /builder/openwrt
+        run: |
+          set -o pipefail
+          make -j"$(nproc)" V=s 2>&1 | tee "${GITHUB_WORKSPACE}/build.log"
+
+      - name: Verify and collect rootfs outputs
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          rootfs="$(find openwrt/bin/targets/armsr/armv8 -maxdepth 1 -name '*rootfs.tar.gz' | head -n1)"
+          manifest="$(find openwrt/bin/targets/armsr/armv8 -maxdepth 1 -name '*.manifest' | head -n1)"
+          test -n "${rootfs}" && test -f "${rootfs}"
+          test -n "${manifest}" && test -f "${manifest}"
+          for package in luci-app-passwall2 hysteria zerotier luci-app-zerotier; do
+            grep -Eq "^${package}[[:space:]-]" "${manifest}" || {
+              echo "Package missing from manifest: ${package}" >&2
+              exit 1
+            }
+          done
+          cp "${rootfs}" release/
+          cp "${manifest}" release/immortalwrt.manifest
+          cp resolved.config release/immortalwrt.config
+          cp versions.env release/versions.env
+          find openwrt/bin/targets/armsr/armv8 -maxdepth 1 -name '*.bom.cdx.json' \
+            -exec cp -t release {} +
+          find openwrt/bin/packages -type f \( \
+            -name 'luci-app-passwall2*.apk' -o \
+            -name 'luci-i18n-passwall2-zh-cn*.apk' -o \
+            -name 'hysteria*.apk' -o \
+            -name 'zerotier*.apk' -o \
+            -name 'luci-app-zerotier*.apk' \
+          \) -exec cp -t release {} +
+          tar -tzf "${rootfs}" | grep -Eq '(^|\./)usr/bin/hysteria$'
+
+      - name: Reclaim space before N1 packaging
+        run: |
+          set -euo pipefail
+          rm openwrt
+          rm -rf "${BUILD_ROOT}/openwrt"
+          df -hT "${BUILD_ROOT}"
+
+      - name: Package only the Phicomm N1 image
+        uses: ophub/amlogic-s9xxx-openwrt@89d550eaf76cab0911ba84e40d16b9e37a05637f
+        with:
+          openwrt_path: release/*rootfs.tar.gz
+          openwrt_board: s905d
+          openwrt_kernel: ${{ env.OPHUB_KERNEL_VERSION }}
+          auto_kernel: false
+          kernel_repo: ophub/kernel
+          kernel_usage: stable
+          openwrt_ip: ${{ env.DEFAULT_IP }}
+          openwrt_size: ${{ env.IMAGE_SIZE }}
+          builder_name: roundfacezxy
+
+      - name: Verify packaged image and create checksums
+        if: ${{ env.PACKAGED_STATUS == 'success' }}
+        run: |
+          set -euo pipefail
+          test -d "${PACKAGED_OUTPUTPATH}"
+          mapfile -t images < <(find "${PACKAGED_OUTPUTPATH}" -type f -name '*.img.gz')
+          if (( ${#images[@]} != 1 )); then
+            echo "Expected exactly one N1 image, found ${#images[@]}." >&2
+            printf '%s\n' "${images[@]}" >&2
+            exit 1
+          fi
+          cp "${images[0]}" release/
+          gzip -9 build.log
+          cp build.log.gz release/
+          (
+            cd release
+            find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+            sha256sum -c SHA256SUMS
+          )
+
+      - name: Publish the audited release
+        if: ${{ env.PACKAGED_STATUS == 'success' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="n1-${IMMORTALWRT_VERSION}-k${OPHUB_KERNEL_VERSION}-build.${GITHUB_RUN_NUMBER}"
+          mapfile -d '' assets < <(find release -type f -print0)
+          gh release create "${tag}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "Phicomm N1 ImmortalWrt ${IMMORTALWRT_VERSION} (kernel ${OPHUB_KERNEL_VERSION})" \
+            --notes "Manual, pinned build for Phicomm N1. Default IP: ${DEFAULT_IP}. USB testing only; do not write eMMC before validation." \
+            "${assets[@]}"

@@ -1,0 +1,10 @@
+# PassWall's feed must come first so its current native clients win over duplicates.
+# Do not add legacy PassWall.
+src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git^b0bf84e252e795d4a78bacb42b2f9428284c73b2
+src-git passwall2 https://github.com/Openwrt-Passwall/openwrt-passwall2.git^ec458173608880fcc40af738761206afc7328125
+
+# ImmortalWrt 25.12.1 release feeds, copied from the official release metadata.
+src-git packages https://github.com/immortalwrt/packages.git^e93a938c63124832d549c41da3157e2ec40fbe05
+src-git luci https://github.com/immortalwrt/luci.git^ed7692cb08a953e2e503287e0337c8b548cf4ba5
+src-git routing https://github.com/openwrt/routing.git^76c933906c616a4cdf865611af0a381787bd87b8
+src-git telephony https://github.com/openwrt/telephony.git^2618106d5846a4a542fdf5809f0d3ed228ce439b
