@@ -135,10 +135,20 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p release
-          rootfs="$(find openwrt/bin/targets/armsr/armv8 -maxdepth 1 -name '*rootfs.tar.gz' | head -n1)"
-          manifest="$(find openwrt/bin/targets/armsr/armv8 -maxdepth 1 -name '*.manifest' | head -n1)"
-          test -n "${rootfs}" && test -f "${rootfs}"
-          test -n "${manifest}" && test -f "${manifest}"
+          mapfile -t rootfs_candidates < <(find openwrt/bin/targets/armsr/armv8 -maxdepth 1 -type f -name '*rootfs.tar.gz')
+          mapfile -t manifest_candidates < <(find openwrt/bin/targets/armsr/armv8 -maxdepth 1 -type f -name '*.manifest')
+          (( ${#rootfs_candidates[@]} == 1 )) || {
+            echo "Expected exactly one rootfs archive, found ${#rootfs_candidates[@]}." >&2
+            printf '%s\n' "${rootfs_candidates[@]}" >&2
+            exit 1
+          }
+          (( ${#manifest_candidates[@]} == 1 )) || {
+            echo "Expected exactly one package manifest, found ${#manifest_candidates[@]}." >&2
+            printf '%s\n' "${manifest_candidates[@]}" >&2
+            exit 1
+          }
+          rootfs="${rootfs_candidates[0]}"
+          manifest="${manifest_candidates[0]}"
           for package in luci-app-passwall2 hysteria zerotier luci-app-zerotier; do
             grep -Eq "^${package}[[:space:]-]" "${manifest}" || {
               echo "Package missing from manifest: ${package}" >&2
@@ -182,9 +192,16 @@ jobs:
           builder_name: roundfacezxy
 
       - name: Verify packaged image and create checksums
-        if: ${{ env.PACKAGED_STATUS == 'success' }}
         run: |
           set -euo pipefail
+          test "${PACKAGED_STATUS:-}" = 'success' || {
+            echo "The N1 packer did not report success." >&2
+            exit 1
+          }
+          test -n "${PACKAGED_OUTPUTPATH:-}" || {
+            echo "The N1 packer did not provide an output directory." >&2
+            exit 1
+          }
           test -d "${PACKAGED_OUTPUTPATH}"
           mapfile -t images < <(find "${PACKAGED_OUTPUTPATH}" -type f -name '*.img.gz')
           if (( ${#images[@]} != 1 )); then
@@ -192,6 +209,12 @@ jobs:
             printf '%s\n' "${images[@]}" >&2
             exit 1
           fi
+          image_name="$(basename "${images[0]}")"
+          [[ "${image_name,,}" == *s905d* ]] || {
+            echo "Packaged image does not identify the selected s905d/N1 board: ${image_name}" >&2
+            exit 1
+          }
+          gzip -t "${images[0]}"
           cp "${images[0]}" release/
           gzip -9 build.log
           cp build.log.gz release/
